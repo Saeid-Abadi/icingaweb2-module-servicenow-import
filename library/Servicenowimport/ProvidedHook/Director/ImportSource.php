@@ -275,7 +275,10 @@ class ImportSource extends ImportSourceHook
 
         $result = $this->extractDisplayValues($data['result'] ?? []);
 
-        return $result;
+        // The Director expects every row to be an object (e.g. for property modifiers)
+        return array_map(function ($row) {
+            return (object) $row;
+        }, $result);
     }
 
     /*
