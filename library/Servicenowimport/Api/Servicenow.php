@@ -33,7 +33,8 @@ class Servicenow
         ];
 
         $method = $auth['method'] ?? 'UNKNOWN';
-        $proxyType = $auth['proxy_type'] ?? 'UNKNOWN';
+        // Director does not store empty settings, so an unconfigured proxy arrives as null
+        $proxyType = (string) ($auth['proxy_type'] ?? '');
 
         try {
             if ($method === 'BASIC') {
@@ -53,9 +54,20 @@ class Servicenow
             throw new RuntimeException(sprintf("Failed to set authentication method %s", $e->getMessage()));
         }
 
-        if ($proxyType !== '') {
+        if (in_array($proxyType, ['HTTP', 'SOCKS5'], true)) {
             try {
-                $proxyAddress = parse_url($auth['proxy_address']);
+                $rawProxy = trim((string) ($auth['proxy_address'] ?? ''));
+                if ($rawProxy === '') {
+                    throw new RuntimeException('no proxy address configured');
+                }
+
+                // parse_url() only detects a host if a scheme or a port is given,
+                // so "proxy.example.com" alone would end up in 'path'
+                $proxyAddress = parse_url(strpos($rawProxy, '://') === false ? '//' . $rawProxy : $rawProxy);
+                if (! is_array($proxyAddress) || empty($proxyAddress['host'])) {
+                    throw new RuntimeException(sprintf('invalid proxy address "%s"', $rawProxy));
+                }
+
                 $proxyHost = $proxyAddress['host'];
                 $proxyScheme = 'https';
                 $proxyPort = 443;
@@ -69,7 +81,16 @@ class Servicenow
                     $proxyPort = $proxyAddress['port'] ?? 1028;
                 }
 
-                $c['proxy'] = sprintf('%s://%s:%s@%s:%d', $proxyScheme, $auth['proxy_user'], $auth['proxy_password'], $proxyHost, $proxyPort);
+                $proxyCredentials = '';
+                if (($auth['proxy_user'] ?? '') !== '') {
+                    $proxyCredentials = sprintf(
+                        '%s:%s@',
+                        rawurlencode($auth['proxy_user']),
+                        rawurlencode($auth['proxy_password'] ?? '')
+                    );
+                }
+
+                $c['proxy'] = sprintf('%s://%s%s:%d', $proxyScheme, $proxyCredentials, $proxyHost, $proxyPort);
             } catch (\Exception $e) {
                 throw new RuntimeException(sprintf("Failed to set proxy method %s", $e->getMessage()));
             }
